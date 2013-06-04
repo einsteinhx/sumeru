@@ -1,0 +1,45 @@
+##Collection新增接口
+
+* #### onUpdate
+
+	对Collection中Model更新的监听方法
+
+	* delta： 更新数据组成的数组
+
+```js
+session.collectionName.onUpdate = function (delta) {
+	
+	//TODO: update operations
+	
+}
+```
+
+
+* #### onInsert
+
+	对Collection中Model更新的监听方法
+
+	* delta： 新增数据组成的数组
+
+```js
+onUpdate = function (delta) {
+	
+	//TODO: insert operations
+	
+}
+```
+
+
+* #### onDelete
+
+	对Collection中Model更新的监听方法
+
+	* delta： 被删除数据组成的数组
+
+```js
+session.collectionName.onDelete = function (delta) {
+	
+	//TODO: delete operations
+	
+}
+```
