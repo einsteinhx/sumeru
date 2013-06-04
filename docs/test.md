@@ -1,4 +1,3 @@
-
 #### onUpdate
 对Collection中Model更新的监听方法  
 ```js
