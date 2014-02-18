@@ -1,8 +1,9 @@
-(function(fw){
-	
+var runnable = function(fw){	
 	
     var _controller = fw.controller;
     var _model = fw.model;
+    var isServer = fw.IS_SUMERU_SERVER;
+    
     function mergeArray(array, struct){
         var structGroupType,structGroupCnt;
         for (var i = 0, ilen = struct.length; i < ilen; i++){
@@ -121,8 +122,21 @@
                     })*/
                     doReactiveProcess = false;
                 } else {
-                    collection.add(structData);
-                    doReactiveProcess = true;    
+                    var externalInfo = fw.pubsub._subscribeMgr[collection.pubName].externalInfo;
+                    if(externalInfo){
+                        var uc = externalInfo.uniqueColumn;
+                        var criteria = {};
+                        criteria[uc] = structData[uc];
+                        var is_uc_exist = collection.find(criteria);
+                        if(is_uc_exist.length){
+                            is_uc_exist[0].set("smr_id", structData.smr_id);
+                        }else{
+                            collection.add(structData);
+                        }
+                    }else{
+                        collection.add(structData);
+                    }
+                    doReactiveProcess = true;  
                 }
             } else if (struct.type == 'delete'){
                 var structData = struct['cnt'];
@@ -156,9 +170,42 @@
             }
             //更新client collection version
             collection.setVersion(serverVersion);
-            //console.log('collection version updated: ', collection);
         }
         return doReactiveProcess;
+    }
+
+
+    function deltaProcess (collection, delta) {
+        
+        var i = [];   //inserted item
+        var d = [];   //deleted item
+        var u = [];   //updated item
+
+        delta.forEach(function(item){
+
+            if (item.type === 'insert') {
+                i.push(item.cnt);
+            } else if (item.type === 'delete') {
+                item.cnt.forEach(function(smr_id){
+                    d.push(smr_id);    
+                });
+            } else if (item.type === 'update') {
+                var cnt = item.cnt;
+                var smr_id = item.id;
+                item.cnt.forEach(function(upd){
+                    u.push({
+                        cnt : upd.cnt,
+                        smr_id : smr_id
+                    });
+                });
+            }
+
+        });
+
+        if(i.length){ collection.onInsert && collection.onInsert(i); }
+        if(d.length){ collection.onDelete && collection.onDelete(d); }
+        if(u.length){ collection.onUpdate && collection.onUpdate(u); }
+
     }
 	
 	function syncCollection(type, pubname, val, item, isPlainStruct, serverVersion){
@@ -184,12 +231,23 @@
         }
         
         if(!isPlainStruct)collection._takeSnapshot();
-        
+
+
+        //onInser, onUpdate, onDelete callback
+        deltaProcess(collection, delta);
+
         if(doReactiveProcess === true){
             
             //因为JS的单线程执行，只要callback中没有setTimeout等异步调用，全局变量tapped_blocks就不会产生类似多进程同时写的冲突。
+            //FIX BY SUNDONG,tapped_blocks在callback不要清空已经bind的东西
+            //添加修正，由于前端渲染是实时进行，所以在前端的回调中，要清空已渲染的
             var tapped_blocks = [];
-            _controller && _controller.__reg('_tapped_blocks', tapped_blocks, true);
+            if (_controller._tapped_blocks && isServer) {
+                tapped_blocks = _controller._tapped_blocks;
+            }else{
+                _controller.__reg('_tapped_blocks', tapped_blocks, true);
+            }
+            
             
             var byPageSegment = new RegExp('@@_sumeru_@@_page_([\\d]+)'),
             ifPageMatch = pubname.match(byPageSegment);
@@ -201,7 +259,8 @@
             } else {
                 item.callback(collection, {
                     delta : delta //FIXME 待端=>云的协议与云=>端的协议统一后，统一提供增量的delta给subscribe
-                });    
+                });
+
             }
             
             //每个Controller的render方法会保证局部渲染一定等待主渲染流程完成才开始。
@@ -209,7 +268,10 @@
         }
         
         //a flag tells if data have been stored remotely
-        if(!isPlainStruct)collection._setSynced(true);
+        if(!isPlainStruct){
+            collection._setSynced(true);
+            fw.cache.setPubData(pubname,item.args,JSON.stringify(collection.getData()));
+        }
     }
     
     /*
@@ -232,7 +294,7 @@
         if (fw.onGlobalMessage) {
             fw.onGlobalMessage(data);
         } else {
-            console.log("GLOBAL MESSAGE : " + data);
+            fw.dev("GLOBAL MESSAGE : " + data);
         }
     };
     
@@ -244,7 +306,7 @@
 	if(fw.onGlobalError ){
 	    fw.onGlobalError(msg);
 	}else{
-	    console.log("GLOBAL ERROR : " + msg);
+	    fw.log("GLOBAL ERROR : " + msg);
 	}
     };
     
@@ -357,12 +419,13 @@
      * 2.添加了从服务器接收公钥
      */
     var onMessage_echo_from_server = function(data){
+        fw.reachability.setStatus_(fw.reachability.STATUS_CONNECTED);
     	var localTimeStamp = (new Date()).valueOf(); 
     	serverTimeStamp = data.timestamp;
     	
     	if (typeof data.swappk !="undefined"){
     	    fw.myrsa.setPk2(data.swappk);
-    	    console.log('从server获得新pk2',data.swappk);
+    	    //fw.log('从server获得新pk2',data.swappk);
         }
     	var getTimeStamp = function(){
     	    var now = (new Date()).valueOf(),
@@ -374,6 +437,7 @@
     	fw.utils.__reg('getTimeStamp', getTimeStamp);
     	
     	Library.objUtils.extend(sumeru.pubsub._publishModelMap, data.pubmap);
+        fw.cache.set('publishModelMap',JSON.stringify(data.pubmap));
     	
         fw.netMessage.sendLocalMessage({}, 'after_echo_from_server');
     };
@@ -389,8 +453,10 @@
          */
         var pubName = data['pubname'];
         var pilotId = data['pilotid'],
-            val = data['data'];
-            serverVersion = data['version'];
+        	uk = data['uk']||"",
+            val = data['data'],
+            serverVersion = data['version'],
+            externalInfo = data['external'] || "";
 
         if(pubName){
             if (!(pubName in fw.pubsub._subscribeMgr)) {
@@ -404,6 +470,10 @@
                 fw.pubsub._priorityAsyncHandler.decrease();
             };
             
+            if(externalInfo){
+                fw.pubsub._subscribeMgr[pubName].externalInfo = externalInfo;
+            }
+            
             //candidates is array of collections
             var candidates = fw.pubsub._subscribeMgr[pubName].stub;
 
@@ -411,9 +481,12 @@
             var isPlainStruct = sumeru.pubsub._publishModelMap[pubName.replace(/@@_sumeru_@@_page_([\d]+)/, '')]['plainstruct'];
             //each stub
             //[{collection:@, onComplete : @}]
-            candidates.forEach(function(item, i){
-                
-                var collection = item.collection;
+            for(var i=0,len=candidates.length,item;i<len;i++){
+        		item = candidates[i];
+        		if (uk && uk!=item.id) {
+                	continue;
+                }
+        	    var collection = item.collection;
 
                 if(isPlainStruct){
                     syncCollection(type, pubName, val, item, isPlainStruct, serverVersion);
@@ -427,7 +500,7 @@
                         syncCollection(type, pubName, val, item, false, serverVersion);
                     }
                 }
-            });
+            };
         }else{
             /*暂无此类调用*/
             var _pilot = sumeru.msgpilot.getPilot(pilotId);
@@ -474,7 +547,7 @@
      * 从本地发来的消息
      */
     var onLocalMessage_data_write_latency = function(data,type){
-	var pubName = data['pubname'];
+	   var pubName = data['pubname'];
         //candidates is array of collections
         var candidates = fw.pubsub._subscribeMgr[pubName].stub;        
         //each stub
@@ -485,7 +558,7 @@
             //因为JS的单线程执行，只要callback中没有setTimeout等异步调用，全局变量tapped_blocks就不会产生类似多进程同时写的冲突。
             var tapped_blocks = [];
             _controller.__reg('_tapped_blocks', tapped_blocks, true);
-            item.callback(collection);
+            item.callback(collection, { delta : [] });
             
             //每个Controller的render方法会保证局部渲染一定等待主渲染流程完成才开始。
             _controller.reactiveRender(tapped_blocks);
@@ -509,7 +582,12 @@
      */
     fw.netMessage.setReceiver({
     	onMessage : {
+            overwrite : true,
     	    target : 'config_write_from_server',
+    	    handle : onMessage_config_write_from_server
+    	},
+    	onLocalMessage : {
+    		target : 'config_write_from_server',
     	    handle : onMessage_config_write_from_server
     	}
     });
@@ -517,20 +595,28 @@
     
     fw.netMessage.setReceiver({
     	onMessage : {
+            overwrite : true,
     	    target : 'echo_from_server',
     	    handle : onMessage_echo_from_server
+    	},
+    	onLocalMessage:{
+            overwrite : true,
+    	    target : ['data_write_latency'],
+    	    handle : onLocalMessage_data_write_latency
     	}
     });
     
     
     fw.netMessage.setReceiver({
     	onMessage:{
+            overwrite : true,
     	    target:['data_write_from_server','data_write_from_server_delta'],
     	    handle : onMessage_data_write_from_server
     	},
     	onLocalMessage:{
-    	    target : ['data_write_latency'],
-    	    handle : onLocalMessage_data_write_latency
+            overwrite : true,
+    	    target:['data_write_from_server','data_write_from_server_delta'],
+    	    handle : onMessage_data_write_from_server
     	},
     	onError:onError,
     	onGlobalError:onGlobalError,
@@ -540,6 +626,7 @@
     fw.netMessage.setReceiver({
         onError:{
             //该标记只有服务端认证失败时才返回
+            overwrite : true,
             target:['data_auth_from_server'],           
             handle : onError_data_auth_from_server
         },
@@ -547,6 +634,7 @@
     fw.netMessage.setReceiver({
         onError:{
             //该标记只有服务端DB操作失败时才返回
+            overwrite : true,
             target:['data_write_from_server_dberror'],           
             handle : onError_data_write_from_server_dberror
         },
@@ -554,8 +642,14 @@
     fw.netMessage.setReceiver({
         onError:{
             //该标记只有服务端model验证失败时才返回
+            overwrite : true,
             target:['data_write_from_server_validation'],           
             handle : onError_data_write_from_server_validation
         },
     });
-})(sumeru);
+};
+if(typeof module !='undefined' && module.exports){
+    module.exports = runnable;
+}else{//这里是前端
+    runnable(sumeru);
+}

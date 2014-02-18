@@ -21,7 +21,7 @@ var DEV = 'development';
 var PRD = 'production';
 var DEM = '--daemon';
 var DAEMON = false;
-var TIME_INIT = 3 * 1000;
+var TIME_INIT = 0.1 * 1000;
 var TIME_KILL_WAIT = 5 * 1000;
 
 var CUR_DIR = process.cwd();
@@ -65,6 +65,10 @@ var args = process.argv.slice(2);
   case 'init':
     legalArgNum(1);
     init(args[0]);
+    break;
+  case 'prepare_for_bae':
+    legalArgNum(3);
+    prepare_for_bae(args);
     break;
   case 'update':
     legalArgNum(1);
@@ -112,21 +116,28 @@ function init(path) {
  *
  * @param {String} ph
  */
-function createApplicationAt(ph) {
+function createApplicationAt(ph, options) {
+	
+  options = options || {};
+
   var name = path.basename(path.resolve(CUR_DIR, ph));
-  copy(path.join(__dirname, '../../'), ph);
+  copyDir(path.join(__dirname, '../../'), ph);
   mkdir(path.join(ph, 'sumeru/server/logs'));
-  setTimeout(function() {
-    var repalcefile = [];
-    for(var i = 0; i < repalcefile.length; i++) {
-      var str = fs.readFileSync(repalcefile[i]).toString();
-      fs.writeFileSync(repalcefile[i], str.replace('$', name));
-    }
-    var rmfile = [path.join(ph, 'sumeru/npm-tools')];
-    for(var i = 0; i < rmfile.length; i++) {
-      exec('rm -rf ' + rmfile[i]);
-    }
-  }, TIME_INIT);
+
+  var repalcefile = [];
+  for(var i = 0; i < repalcefile.length; i++) {
+    var str = fs.readFileSync(repalcefile[i]).toString();
+    fs.writeFileSync(repalcefile[i], str.replace('$', name));
+  }
+  var rmfile = [path.join(ph, 'sumeru/npm-tools')];
+  for(var i = 0; i < rmfile.length; i++) {
+    exec('rm -rf ' + rmfile[i]);
+  }
+    
+  if(!options['noFarewell']){  
+  	console.log('   \x1b[36mCongratulations! Your application has been succesfully initiated\x1b[0m');
+  }
+  
 };
 
 /**
@@ -165,19 +176,60 @@ function updateApplicationAt(ph) {
       backupPath = path.join(ph, 'backup/' + currentDate);
 
   mkdir(backupPath);
-  copy(ph, backupPath);
+  copyDir(ph, backupPath);
   
-  setTimeout(function(){      
-    //use create to init a new project
-    createApplicationAt(ph);
+  //use create to init a new project
+  createApplicationAt(ph, {
+  	noFarewell : true
+  });
 
-    setTimeout(function(){
 
-      //copy app back
-      copy(path.join(backupPath, 'app'), path.join(ph, 'app'));  
-    }, TIME_INIT);
-  }, TIME_INIT);
+  //copy app back
+  copyDir(path.join(backupPath, 'app'), path.join(ph, 'app'));  
 
+  //since 0.8.0, we have server_config in each app directory
+  //check if do NOT have one, copy from the sample app
+  //FIXME doesn't support multiple app scenario
+  var server_config_path = path.join(ph, 'app/server_config');
+  if(!fs.existsSync(server_config_path)){
+  	copyDir(path.join(__dirname, '../../app/server_config'), server_config_path);
+  }
+  
+  //since 0.8.16, we have server_config/mime.js & server_config/tmp_dir.js in each app directory
+  //check if do NOT have one, copy from the sample app
+  //FIXME doesn't support multiple app scenario
+  var server_config_path = path.join(ph, 'app/server_config'),
+  	  mime_js = path.join(server_config_path, 'mime.js'),
+      tmp_dir_js = path.join(server_config_path, 'tmp_dir.js'),
+      cluster_js = path.join(server_config_path, 'cluster.js'),
+  	  package_js = path.join(server_config_path, 'package.js');
+  	  
+  if(!fs.existsSync(mime_js)){
+  	copyFile(path.join(__dirname, '../../app/server_config/mime.js'), mime_js);
+  }
+  if(!fs.existsSync(tmp_dir_js)){
+    copyFile(path.join(__dirname, '../../app/server_config/tmp_dir.js'), tmp_dir_js);
+  }
+
+  if(!fs.existsSync(cluster_js)){
+    copyFile(path.join(__dirname, '../../app/server_config/cluster.js'), cluster_js);
+  }
+  //check if package.json contains them, if not, add them.
+  var pkgContent = fs.readFileSync(package_js).toString();
+  if(pkgContent.match(/mime\.js/m) == null){
+	 pkgContent = pkgContent.replace(/sumeru.packages\(/g, function($0){return $0 + '\n' + "'mime.js,'"});
+  }
+  if(pkgContent.match(/tmp_dir\.js/m) == null){
+   pkgContent = pkgContent.replace(/sumeru.packages\(/g, function($0){return $0 + '\n' + "'tmp_dir.js,'"});
+  }
+  if(pkgContent.match(/cluster\.js/m) == null){
+   pkgContent = pkgContent.replace(/sumeru.packages\(/g, function($0){return $0 + '\n' + "'cluster.js,'"});
+  }
+  fs.writeFileSync(package_js, pkgContent);
+  
+  
+  console.log('   \x1b[36mCongratulations! Your application has been succesfully upgraded\x1b[0m');
+  
 };
 
 /**
@@ -220,7 +272,24 @@ function start() {
   } else abort(NOWORKSPACE_ERROR);
 };
 
-
+function prepare_for_bae(args){
+	if(!IF_WORKSPACE) {
+		abort(NOWORKSPACE_ERROR);
+	}
+	var the_process = spawn(process.execPath, [path.resolve(HOME, '../build/prepareForBae.js'), args[0], args[1], args[2]]);
+	the_process.stdout.on('data', function(data) {
+		console.log(data.toString());
+	});
+	the_process.stderr.on('data', function(data) {
+		console.log(data.toString());
+	});
+	the_process.on('close', function (code) {
+		if(code == 0){
+			console.log('   \x1b[36mCongratulations! Your application has been succesfully prepared\x1b[0m');
+		}
+	});
+	
+}
 
 /**
  * Terminal application.
@@ -298,18 +367,54 @@ function legalArgNum(argNum) {
 };
 
 /**
+ * Copy one file to project.
+ *
+ * @param {String} origin
+ * @param {String} target
+ */
+function copyFile(origin, target) {
+  if(!fs.existsSync(origin)) abort(origin + ' is not exist.');
+  if(!fs.existsSync(path.dirname(target))) {
+    mkdir(path.dirname(target));
+    console.log('   \x1b[36mcreate\x1b[0m : ' + path.dirname(target));
+  }
+
+
+  if(fs.statSync(origin).isFile()) {
+    fs.writeFileSync(target, fs.readFileSync(origin, ''), '');
+    console.log('   \x1b[36mcreate\x1b[0m : ' +  target);
+  }
+  
+};
+
+/**
  * Copy template files to project.
  *
  * @param {String} origin
  * @param {String} target
  */
-function copy(origin, target) {
+function copyDir(origin, target) {
   if (path.basename(origin) == 'backup') {return};
   if(!fs.existsSync(origin)) abort(origin + ' is not exist.');
-  if(!fs.existsSync(target)) {
+  if(!fs.existsSync(target) && fs.statSync(origin).isDirectory()) {
     mkdir(target);
     console.log('   \x1b[36mcreate\x1b[0m : ' + target);
   }
+  
+  var datalist = fs.readdirSync(origin);
+  
+  for(var i = 0; i < datalist.length; i++) {
+      var oCurrent = path.resolve(origin, datalist[i]);
+      var tCurrent = path.resolve(target, datalist[i]);
+      if(fs.statSync(oCurrent).isFile()) {
+        fs.writeFileSync(tCurrent, fs.readFileSync(oCurrent, ''), '');
+        console.log('   \x1b[36mcreate\x1b[0m : ' + tCurrent);
+      } else if(fs.statSync(oCurrent).isDirectory()) {
+      	copyDir(oCurrent, tCurrent);
+      }
+  }
+  
+  /*
   fs.readdir(origin, function(err, datalist) {
     if(err) abort(FILEREAD_ERROR);
     for(var i = 0; i < datalist.length; i++) {
@@ -318,9 +423,9 @@ function copy(origin, target) {
       if(fs.statSync(oCurrent).isFile()) {
         fs.writeFileSync(tCurrent, fs.readFileSync(oCurrent, ''), '');
         console.log('   \x1b[36mcreate\x1b[0m : ' + tCurrent);
-      } else if(fs.statSync(oCurrent).isDirectory()) copy(oCurrent, tCurrent);
+      } else if(fs.statSync(oCurrent).isDirectory()) copyDir(oCurrent, tCurrent);
     }
-  });
+  });*/
 };
 
 /**
@@ -330,11 +435,18 @@ function copy(origin, target) {
  * @param {Function} fn
  */
 function mkdir(path, fn) {
+  /*
   mkdirp(path, 0755, function(err){
     if (err) throw err;
     console.log('   \033[36mcreate\033[0m : ' + path);
     fn && fn();
   });
+  */
+  var path = mkdirp.sync(path, 0755);
+  if(path){
+  	console.log('   \033[36mmkdir\033[0m : ' + path);	
+  }
+  fn && fn();
 }
 
 /**

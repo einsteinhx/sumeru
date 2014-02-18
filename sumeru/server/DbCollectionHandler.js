@@ -120,26 +120,37 @@ var runnable = function(fw){
     case MONGO:
     default:
         var mongodb = require('mongodb');
+        
+        //compatible with old versions.
+        var databaseConfig = config.database || config;
+        
         var serverOptions = {
             'auto_reconnect': true,
-            'poolSize': 25         //MAX IS 2000
+            'poolSize': databaseConfig.get('poolSize')         //MAX IS 2000
           };
         
-        var host = config.get('mongoServer'),
-            port = config.get('mongoPort'),
-            username = config.get('bae_user'),
-            password = config.get('bae_password');
+        var host = databaseConfig.get('mongoServer') || '127.0.0.1',
+            port = databaseConfig.get('mongoPort') || 27017,
+            username = databaseConfig.get('user') || '',
+            password = databaseConfig.get('password') || '';
         
-        if(process && process.BAE){
+        if(fw.BAE_VERSION === 2){
             host = process.env.BAE_ENV_ADDR_MONGO_IP;
             port = +process.env.BAE_ENV_ADDR_MONGO_PORT;
             username = process.env.BAE_ENV_AK;
             password = process.env.BAE_ENV_SK;
+        }else if (fw.BAE_VERSION === 3){
+            host = 'mongo.duapp.com';
+            port = 8908;
         }
         
         var server = new mongodb.Server(host, port, serverOptions);
-        var db = new mongodb.Db(config.get('dbname'), server, {});
-	
+        var db = new mongodb.Db(databaseConfig.get('dbname') || 'test', server, {w : 1});
+        
+        db.on('error',function(){
+            console.log("ERROR : DbCollectionHandle.js : 148 : ",arguments);
+        });
+        
         ObjectId = mongodb.ObjectID;
         
         getDbCollectionHandler = function(modelName, callback) {
@@ -161,19 +172,17 @@ var runnable = function(fw){
         createDB = function(callback){
             db.open(function(err, db){
         		if (err){
-        		    console.log('DB OPEN ERROR');
-        		    console.log(err);
+        		    fw.log('DB OPEN ERROR', err);
         		    return;
         		}
         		
         		if (username !== '' || password !== ''){
         		    db.authenticate(username,password,function(err,result){
-                            	if (!err){
-        			    callback(db);
-        			}else {
-        			    console.log('DB auth failed');
-        			    console.log(err);
-        			}
+                        if (!err){
+            			    callback(db);
+            			}else {
+            			    fw.log('DB auth failed', 'database :', databaseConfig.get('dbname'), 'username :', username, 'password :', password, err);
+            			}
         		    })
         		}else{
         		     callback(db);

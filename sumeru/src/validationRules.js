@@ -37,9 +37,9 @@ var runnable = function(fw){
 									});
 	fw.validation.addrule("required" , {
 										"runat":"both",
-										"func":function(value){
-											var v = v+""||"",
-												len = v.length;
+										"func":function(v){
+											var v = typeof v != "undefined"?v+"":"";
+											var len = v.length;
 											return len>0;
 										},
 										"msg":"$1为必填项。"
@@ -61,7 +61,7 @@ var runnable = function(fw){
 									});
 	fw.validation.addrule("email" , {   
 										"runat":"both",
-										"regexp":"^[a-zA-Z0-9_\.\-\+]+\@([a-zA-Z0-9\-]+\.)+[a-zA-Z0-9]{2,4}$",
+										"regexp":"^[a-zA-Z0-9_\.\+\-]+\@([a-zA-Z0-9\-]+\.)+[a-zA-Z0-9]{2,4}$",
 										"msg":"$1必须为email格式。"
 									});
 	fw.validation.addrule("onlyletter" , {
@@ -81,12 +81,12 @@ var runnable = function(fw){
 									});
 	fw.validation.addrule("chinese" , {  
 										"runat":"both", 
-								        "regexp":"/^[\u4e00-\u9fa5]+$/",
+								        "regexp":"^[\u4e00-\u9fa5]+$",
 										"msg":"$1必须为中文。"
 								    });
 	fw.validation.addrule("url" , {   
 										"runat":"both",
-								        "regexp":"/^[a-zA-z]:\\/\\/[^s]$/",
+								        "regexp":"^[A-Za-z]+://[A-Za-z0-9-_]+\\.[A-Za-z0-9-_%&\?\/.=]+$",
 										"msg":"$1必须为URL。"
 								    });
 	fw.validation.addrule("unique" , {

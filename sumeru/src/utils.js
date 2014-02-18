@@ -1,10 +1,15 @@
 var runnable = function(fw){
     
+    if(fw.utils){
+        return fw.utils;
+    }
+    
     var utils = fw.addSubPackage('utils'); 
 	
     //========== inner function =================//
     var arrSplice = Array.prototype.splice;
     var arrConcat = Array.prototype.concat;
+    var isArray = Array.isArray;
     
     var callArrSpl = function(arr/*,...args*/){
         return arrSplice.apply(arr,arrSplice.call(arguments,1));
@@ -301,7 +306,236 @@ var runnable = function(fw){
         __randomMap[rand] = 1;
         return rand;
     };
-	
+
+    //========= 以下为用到的工具代码，huangxin03  ==========//
+
+    //深度克隆
+    var clone = function(item){
+
+        if (!item) { return item; } // null, undefined values check
+
+        var types = [ Number, String, Boolean ], 
+            result;
+
+        // normalizing primitives if someone did new String('aaa'), or new Number('444');
+        types.forEach(function(type) {
+            if (item instanceof type) {
+                result = type( item );
+            }
+        });
+
+        if (typeof result == "undefined") {
+            if (Object.prototype.toString.call( item ) === "[object Array]") {
+                result = [];
+                item.forEach(function(child, index, array) { 
+                    result[index] = clone( child );
+                });
+            } else if (typeof item == "object") {
+                // testing that this is DOM
+                if (item.nodeType && typeof item.cloneNode == "function") {
+                    var result = item.cloneNode( true );    
+                } else if (!item.prototype) { // check that this is a literal
+                    if (item instanceof Date) {
+                        result = new Date(item);
+                    } else {
+                        // it is an object literal
+                        result = {};
+                        for (var i in item) {
+                            result[i] = clone( item[i] );
+                        }
+                    }
+                } else {
+                    // depending what you would like here,
+                    // just keep the reference, or create new object
+                    if (false && item.constructor) {
+                        // would not advice to do that, reason? Read below
+                        result = new item.constructor();
+                    } else {
+                        result = item;
+                    }
+                }
+            } else {
+                result = item;
+            }
+        }
+
+        return result;
+
+    }
+
+    fw.utils.__reg('deepClone', clone);
+
+    //merge two object, append b to a
+    var merge = function(a, b){
+
+        var copy = clone(a);
+
+        for(x in b){
+            typeof copy[x] !== 'undefined' ? false :copy[x] = b[x];
+        }
+        return copy;
+    }
+
+    fw.utils.__reg('merge', merge);
+    
+    // modify from node emitter
+    var simpleEventEmitter = function(){
+        this._events = {};
+    };
+
+    simpleEventEmitter.prototype = {
+        addEventListener:function(type,listener){
+            if ('function' !== typeof listener) {
+                throw new Error('addListener only takes instances of Function');
+              }
+
+              if (!this._events) this._events = {};
+
+              // To avoid recursion in the case that type == "newListeners"! Before
+              // adding it to the listeners, first emit "newListeners".
+              this.emit('newListener', type, typeof listener.listener === 'function' ?
+                        listener.listener : listener);
+
+              if (!this._events[type]) {
+                // Optimize the case of one listener. Don't need the extra array object.
+                this._events[type] = listener;
+              } else if (isArray(this._events[type])) {
+
+                // If we've already got an array, just append.
+                this._events[type].push(listener);
+
+              } else {
+                // Adding the second element, need to change to array.
+                this._events[type] = [this._events[type], listener];
+
+              }
+
+              // Check for listener leak
+              if (isArray(this._events[type]) && !this._events[type].warned) {
+                var m;
+                m = this._maxListeners;
+
+                if (m && m > 0 && this._events[type].length > m) {
+                  this._events[type].warned = true;
+                  console.error('(node) warning: possible EventEmitter memory ' +
+                                'leak detected. %d listeners added. ' +
+                                'Use emitter.setMaxListeners() to increase limit.',
+                                this._events[type].length);
+                  console.trace();
+                }
+              }
+
+              return this;
+        },
+        on:function(type,listener){
+            return this.addEventListener.apply(this,arguments);
+        },
+        once:function(type,listener){
+            if ('function' !== typeof listener) {
+                throw new Error('.once only takes instances of Function');
+              }
+
+              var self = this;
+              function g() {
+                self.removeListener(type, g);
+                listener.apply(this, arguments);
+              };
+
+              g.listener = listener;
+              self.on(type, g);
+
+              return this;
+        },
+        removeListener:function(type,listener){
+              if ('function' !== typeof listener) {
+                throw new Error('removeListener only takes instances of Function');
+              }
+
+              // does not use listeners(), so no side effect of creating _events[type]
+              if (!this._events || !this._events[type]) return this;
+
+              var list = this._events[type];
+
+              if (isArray(list)) {
+                var position = -1;
+                for (var i = 0, length = list.length; i < length; i++) {
+                  if (list[i] === listener ||
+                      (list[i].listener && list[i].listener === listener))
+                  {
+                    position = i;
+                    break;
+                  }
+                }
+
+                if (position < 0) return this;
+                list.splice(position, 1);
+                if (list.length == 0)
+                  delete this._events[type];
+              } else if (list === listener ||
+                         (list.listener && list.listener === listener))
+              {
+                delete this._events[type];
+              }
+
+              return this;
+        },
+        removeAllListeners : function(type) {
+            if (arguments.length === 0) {
+              this._events = {};
+              return this;
+            }
+
+            // does not use listeners(), so no side effect of creating _events[type]
+            if (type && this._events && this._events[type]) this._events[type] = null;
+            return this;
+          },
+        emit:function(event){
+            var type = arguments[0];
+           
+            if (!this._events) return false;
+            var handler = this._events[type];
+            if (!handler) return false;
+
+            if (typeof handler == 'function') {
+              
+              switch (arguments.length) {
+                // fast cases
+                case 1:
+                  handler.call(this);
+                  break;
+                case 2:
+                  handler.call(this, arguments[1]);
+                  break;
+                case 3:
+                  handler.call(this, arguments[1], arguments[2]);
+                  break;
+                // slower
+                default:
+                  var l = arguments.length;
+                  var args = new Array(l - 1);
+                  for (var i = 1; i < l; i++) args[i - 1] = arguments[i];
+                  handler.apply(this, args);
+              }
+              return true;
+
+            } else if (isArray(handler)) {
+             
+              var l = arguments.length;
+              var args = new Array(l - 1);
+              for (var i = 1; i < l; i++) args[i - 1] = arguments[i];
+
+              var listeners = handler.slice();
+              for (var i = 0, l = listeners.length; i < l; i++) {
+                listeners[i].apply(this, args);
+              }
+              return true;
+            } else {
+              return false;
+            }
+        }
+    };
+    
+    fw.utils.__reg('emitter', simpleEventEmitter);
 };
 
 if(typeof module !='undefined' && module.exports){

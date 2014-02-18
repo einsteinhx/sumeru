@@ -1,5 +1,6 @@
 var path = require('path');
 var fs = require('fs');
+var _debug = false;
 
 var baseDir = path.join(__dirname, '../../');
 var sumeruDir = path.join(__dirname, '/../');
@@ -7,11 +8,18 @@ var dstDir = '';//加注释
 var buildConfig = require(path.join(__dirname, 'buildList.json'));
 
 
+var sumeru = require(__dirname + '/../src/newPkg.js')();
+
+require(__dirname + '/../src/log.js')(sumeru);
+
 /**BAE环境模拟测试用**/
 //process.BAE = 'bae';
 
+var appDir;
 if (typeof process.BAE !== 'undefined'){
-console.log('BAE MODE');
+    sumeru.dev('BAE MODE');
+    appDir = path.join(__dirname, '/../../app');
+    
     dstDir = path.join(baseDir, '/__bae__');
     var serverDir = path.join(dstDir, '/server');
     var binDir = path.join(dstDir, '/bin');
@@ -23,15 +31,23 @@ console.log('BAE MODE');
     !fs.existsSync(tmpDir) && fs.mkdirSync(tmpDir);
     !fs.existsSync(binDir) && fs.mkdirSync(binDir);
     !fs.existsSync(staticDir) && fs.mkdirSync(staticDir);
+    
+
 }else{
-console.log('NON BAE MODE');
-    dstDir = path.join(__dirname, '/../../app' + (process.argv[2] ? '/' +process.argv[2] : ''));
+    sumeru.dev('NON BAE MODE');
+    appDir = path.join(__dirname, '/../../app' + (process.argv[2] ? '/' +process.argv[2] : ''));
+    dstDir = appDir;//path.join(__dirname, '/../../app' + (process.argv[2] ? '/' +process.argv[2] : ''));
+    
 }
-console.log('BaseDir :' + baseDir);
-console.log('DstDir :' + dstDir);
+process.appDir = appDir;
 
 process.baseDir = baseDir;
 process.dstDir = dstDir;
+
+
+sumeru.dev('build from :' + baseDir);
+sumeru.dev('to :' + dstDir);
+
 
 if (baseDir.charAt(baseDir.length-1) == '/'){
     //去掉尾部的'/'
@@ -54,49 +70,108 @@ var buildAppResource = function(appDir, theBinDir){
     var buildAppContent = '';
     var buildAppCssContent = '';
 
-    function readPackage(path){
-        var url = path + '/package.js';
-        var entireContent = fs.readFileSync(url, 'utf-8');
-        var contentReg = /packages\s*\(\s*(.*)\s*\)/mg;
-        var dirnameList = [];
-        
-        //去掉换行符、换页符、回车符等
-        entireContent = entireContent.replace(/\n|\r|\t|\v|\f/g, '');
-        
-        //取出参数， 存于dirnameList
-        var result = contentReg.exec(entireContent);
-        entireContent = result[1];
-        entireContent = entireContent.replace(/'|"/mg, '');
-        dirnameList = entireContent.split(',');
-        
-        dirnameList.forEach(function(dirname){
-            dirname = dirname.trim();
-            if(!dirname)return;
-            
-            var reg = /.js$/g,
-                cssReg = /.css$/g;
-            
-            var fileUrl = path + '/' + dirname;
-            if(reg.test(dirname)){
-                buildAppContent += ';'+fs.readFileSync(fileUrl, 'utf-8');
-            }else if(cssReg.test(dirname)){
-                buildAppCssContent += fs.readFileSync(fileUrl, 'utf-8');
-            }else{
-                readPackage(fileUrl);
-            }
-        });
-    };
+    var readPackage = function(path) {
+      var url = path + '/package.js';
+      var entireContent = fs.readFileSync(url, 'utf-8');
+      var contentReg = /packages\s*\(\s*(.*)\s*\)/mg;
+      var commentReg = /\/\/.*(\n|\r)|(\/\*(.*?)\*\/)/mg;
+      var dirnameList = [];
+         
+      //去掉在package.js里的注释
+      entireContent = entireContent.replace(commentReg, '');  
+    
+      //去掉换行符、换页符、回车符等
+      entireContent = entireContent.replace(/\n|\r|\t|\v|\f/g, '');
+      //取出参数， 存于dirnameList
+      var result = contentReg.exec(entireContent);
+      if (result === null) {
+        return;
+      }
+      entireContent = result[1];
+      entireContent = entireContent.replace(/'|"/mg, '');
+      dirnameList = entireContent.split(',');
+
+      dirnameList.forEach(function(dirname) {
+        dirname = dirname.trim();
+        if (!dirname) {
+          return;
+        }
+
+        var reg = /.js$/g,
+        cssReg = /.css$/g;
+
+        var fileUrl = path + '/' + dirname;
+        if (reg.test(dirname)) {
+          buildAppContent += ';'+fs.readFileSync(fileUrl, 'utf-8');
+        } else if (cssReg.test(dirname)) {
+          buildAppCssContent += fs.readFileSync(fileUrl, 'utf-8');
+        } else {
+          readPackage(fileUrl);
+        }
+      });
+    }
 
     readPackage(appDir);
+
+
+
+    
+    var UglifyJS = require('uglify-js');
+  
+    //压缩js代码
+    var orig_code = buildAppContent;
+    var ast = UglifyJS.parse(orig_code); // parse code and get the initial AST
+    
+    /*     
+     * Compressor options
+     * 
+     * sequences     : true,  // join consecutive statemets with the “comma operator”
+     * properties    : true,  // optimize property access: a["foo"] → a.foo
+     * dead_code     : true,  // discard unreachable code
+     * drop_debugger : true,  // discard “debugger” statements
+     * unsafe        : false, // some unsafe optimizations (see below)
+     * conditionals  : true,  // optimize if-s and conditional expressions
+     * comparisons   : true,  // optimize comparisons
+     * evaluate      : true,  // evaluate constant expressions
+     * booleans      : true,  // optimize boolean expressions
+     * loops         : true,  // optimize loops
+     * unused        : true,  // drop unused variables/functions
+     * hoist_funs    : true,  // hoist function declarations
+     * hoist_vars    : false, // hoist variable declarations
+     * if_return     : true,  // optimize if-s followed by return/continue
+     * join_vars     : true,  // join var declarations
+     * cascade       : true,  // try to cascade `right` into `left` in sequences
+     * side_effects  : true,  // drop side-effect-free statements
+     * warnings      : true,  // warn about potentially dangerous optimizations/code
+     * global_defs   : {}     // global definitions
+     * 
+     * */
+    
+    var compressor = UglifyJS.Compressor({
+        unused : false,
+        warnings: false
+    });
+    ast.figure_out_scope();
+    var compressed_ast = ast.transform(compressor);
+    compressed_ast.figure_out_scope();
+    compressed_ast.compute_char_frequency();
+    compressed_ast.mangle_names(); // get a new AST with mangled names
+    var packedAppContent = compressed_ast.print_to_string(); // compressed code here
+
+    //clean css
+    var cleanCSS = require('clean-css');
+    var packedAppCssContent = cleanCSS.process(buildAppCssContent);
+    
     
     if(typeof process.BAE !== 'undefined'){
-        fs.writeFileSync(binDir + '/app.js', buildAppContent, 'utf-8');
-        fs.writeFileSync(binDir + '/app.css', buildAppCssContent, 'utf-8');
+        fs.writeFileSync(binDir + '/app.js', packedAppContent, 'utf-8');
+        fs.writeFileSync(binDir + '/app.css', packedAppCssContent, 'utf-8');
         buildView(appDir, binDir);
         buildManifest(appDir, path.join(dstDir, 'bin'));
     }else{
-        fs.writeFileSync(theBinDir + '/app.js', buildAppContent, 'utf-8');
-        fs.writeFileSync(theBinDir + '/app.css', buildAppCssContent, 'utf-8');
+        fs.writeFileSync(theBinDir + '/app.js', _debug?buildAppContent:packedAppContent, 'utf-8');
+        fs.writeFileSync(theBinDir + '/app.css', _debug?buildAppCssContent:packedAppCssContent, 'utf-8');
+
         buildView(appDir, theBinDir);
         buildManifest(appDir, theBinDir);
     }
@@ -114,11 +189,14 @@ var buildManifest = function(appDir, theBinDir){
     var cacheViewStr = '';
 
     var readAllFileInView = function(bsvdir, httpBase){
-        if(path.existsSync(bsvdir)){
+        if(fs.existsSync(bsvdir)){
             var theDirFiles = fs.readdirSync(bsvdir);
             if(theDirFiles && theDirFiles.length > 0){
                 for(var i=0; i < theDirFiles.length; i++){
-                    if(theDirFiles[i].indexOf('.') > -1){
+                    if (theDirFiles[i] == '.svn' || theDirFiles[i] == '.git') {
+                        continue;
+                    };
+                    if(fs.statSync(path.join(bsvdir, theDirFiles[i])).isFile()){
                         allFiles.push(httpBase + '/' + theDirFiles[i]);
                     }else{
                         readAllFileInView(bsvdir + '/' + theDirFiles[i], httpBase + '/' + theDirFiles[i]);
@@ -127,7 +205,7 @@ var buildManifest = function(appDir, theBinDir){
             }
         }
     };
-    readAllFileInView(baseViewDir,  'view');
+    readAllFileInView(baseViewDir,  '/view');
 
     var cdir = buildConfig.cacheDirectory;
     if(cdir){
@@ -171,7 +249,7 @@ var buildManifest = function(appDir, theBinDir){
         }
     }
 
-    var cache_res_list = '../index.html\nsumeru.css\n';
+    var cache_res_list = 'sumeru.css\n';
     cache_res_list += 'sumeru.js\napp.js\n';
     cache_res_list += cacheViewStr;
     cache_res_list += appCache;
@@ -216,7 +294,7 @@ var copySumeruFile2AppBin = function(){
             buildAppResource(dir, theBinDir);
         }
     });
-}
+};
 
 copySumeruFile2AppBin();
 

@@ -17,18 +17,26 @@
 	 * add className
 	 * klass可以是string或array
 	 */
-	var _addClass = function(obj,klass){
-	  if ( typeof klass === 'string' && _hasClass(obj,klass) ) return;
-	  var _ks = _trim(obj.className).replace(/\s+/g," ").split(" ");
-		_ks = _ks.concat(klass);
-		obj.className = _ks.join(" ");
-	};
-	
-	var _hasClass = function(obj,klass) {
-        var rex = new RegExp("( |^)" + klass+"( |$)",["i"]);
-        if ( obj.className.match(rex) ) {
-            return true;
+    var _addClass = function(obj,klass){
+      var klass = _hasClass(obj,klass);
+      if (klass.length===0) return;
+      var _ks = _trim(obj.className).replace(/\s+/g," ").split(" ");
+        _ks = _ks.concat(klass);
+        obj.className = _ks.join(" ");
+    };
+    
+    var _hasClass = function(obj,klass) {
+        if ( typeof klass === 'string'){
+            klass = [klass];
         }
+        var neededItems = [];
+        Array.prototype.forEach.call(klass,function(k){
+            var rex = new RegExp("( |^)" + k+"( |$)",["i"]);
+            if ( !obj.className.match(rex) ) {
+                neededItems.push(k);
+            }
+        });
+        return neededItems;
    }
 	/**
 	 * remove className
@@ -155,7 +163,7 @@
     };
 	
 	//容器
-	var _warp = null;
+	var _wrap = null;
 
 	var _createClassName = function(status,act){
         if(!(act instanceof Array && act.length>1)){
@@ -178,13 +186,16 @@
 			classname:null
 		}
 	};
-	var _isFristLode = true;
+	var _isFirstLoad = true;
 	var _init = function(){
-		_warp = document.createElement("div");
-		_warp.className = "warp";
-		document.body.appendChild(_warp);
-		_isFristLode = false;
-		_fixSreenSize(_warp);
+		if (!(_wrap = document.getElementById("_smr_runtime_wrapper"))) {
+			_wrap = document.createElement("div");
+	        _wrap.className = "_smr_runtime_wrapper";
+	        _wrap.id = "_smr_runtime_wrapper";
+			document.body.appendChild(_wrap);
+			// _fixSreenSize(_wrap);
+		}
+		_isFirstLoad = false;
 	};
 
     var _createFlipObj = function(frontdom,backdom){
@@ -219,7 +230,9 @@
         }
         
         if ( target.anim && typeof target.anim[1] !== 'undefined' &&  typeof act_direct_name[target.anim[1]] !== 'undefined' ) {
-            target.anim[1] = act_direct_name[target.anim[1]];
+            
+            target.anim = [target.anim[0],act_direct_name[target.anim[1]]];
+            //target.anim[1] = act_direct_name[target.anim[1]];
         }
         
         if(!target.anim || typeof _act[target.anim[0]] === "undefined"
@@ -254,7 +267,7 @@
 	 */
 	var _transition = function(target){
 
-		if(_isFristLode) _init();
+		if(_isFirstLoad) _init();
         __dealTransitionAnim(target);
         
         var show = _setting.showScene;
@@ -270,7 +283,7 @@
                     target.dom_back = target.dom[1];
                     
                 }
-                //console.log(show.dom == target.dom,show.dom, target.dom)
+                //fw.log(show.dom == target.dom,show.dom, target.dom)
                 //有clonedom，说明是自己推自己，我要给他附加上去成背景图案，推完自己再抹去。
                 if (target.cloneDom ) {
                     show.dom.parentNode.appendChild( target.cloneDom );
@@ -314,17 +327,17 @@
                             &&hide.dom_front!=target.dom_front
                             &&hide.dom_front!=target.dom_back){
                             hide.dom_front.className = hide.front_classname?("hide "+hide.front_classname):"hide";
-                            _warp.appendChild(hide.dom_front);
+                            _wrap.appendChild(hide.dom_front);
                             f_rm++;
                         }
                         if(hide.dom_back!=target.dom
                             &&hide.dom_back!=target.dom_front
                             &&hide.dom_back!=target.dom_back){
                             hide.dom_back.className = hide.back_classname?("hide "+hide.back_classname):"hide";
-                            _warp.appendChild(hide.dom_back);
+                            _wrap.appendChild(hide.dom_back);
                             f_rm++
                         }
-                        _warp.removeChild(hide.dom);
+                        _wrap.removeChild(hide.dom);
                         
                     }else{
                         if(hide.dom!=target.dom
@@ -370,9 +383,9 @@
                 _addClass(_standby,[_createClassName("standby",target["anim"]),blockClassName]);
 
 
-                //把dom移动到warp中
-                if(_warp!=_standby.parentElement){
-                    _warp.appendChild(_standby);
+                //把dom移动到wrap中
+                if(_wrap!=_standby.parentElement){
+                    _wrap.appendChild(_standby);
                 }
                 _removeClass(_standby,"hide");
 
@@ -445,7 +458,11 @@
 	    this.style.display = "none";
 	}
 	
-	fw.transition.__reg('_run', _transition, 'private');
+    fw.transition.__reg('_init', _init, 'private');
+    fw.transition.__reg('_run', _transition, 'private');
+    fw.transition.__reg('_serverRun', function(){
+        
+    }, 'private');
 	fw.transition.__reg('_subrun', _subtransition, 'private');
 	
 	

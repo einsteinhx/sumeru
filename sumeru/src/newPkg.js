@@ -1,5 +1,5 @@
-// FIXME Debug开关, 发布时删除
-var SUMERU_APP_FW_DEBUG = false;
+//Debug开关, 发布时删除
+var SUMERU_APP_FW_DEBUG = true;
 
 (function(global,rootName) {
     /**
@@ -263,6 +263,7 @@ var SUMERU_APP_FW_DEBUG = false;
     
 
     if(typeof module !='undefined' && module.exports){
+        GLOBAL[rootName] = global[rootName];    // 在node端仍然绑定到全局空间一个名为sumeru的对像
         module.exports = function(){
             return global[rootName];
         };

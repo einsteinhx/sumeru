@@ -3,6 +3,10 @@
   * and copy the built files to bin dir.
   *
   */
+var sumeru = require(__dirname + '/../src/newPkg.js')();
+require(__dirname + '/../src/log.js')(sumeru);
+var _debug = false;
+
 module.exports = function(sumeruDir, dstDir) {
   var fs = require('fs');
   var path = require('path');
@@ -20,7 +24,6 @@ module.exports = function(sumeruDir, dstDir) {
     var buildCSSEntireContent = '';
     var targetJsFileName = path.join(binDir, 'sumeru.js');
     var targetCSSFileName = path.join(binDir, 'sumeru.css');
-    var offline_manifest = path.join(binDir, 'cache.manifest');
 
     !fs.existsSync(binDir) && fs.mkdirSync(binDir);
   
@@ -37,6 +40,9 @@ module.exports = function(sumeruDir, dstDir) {
       entireContent = entireContent.replace(/\n|\r|\t|\v|\f/g, '');
       //取出参数， 存于dirnameList
       var result = contentReg.exec(entireContent);
+      if (result === null) {
+           return;
+      }
       entireContent = result[1];
       entireContent = entireContent.replace(/'|"/mg, '');
       dirnameList = entireContent.split(',');
@@ -71,7 +77,10 @@ module.exports = function(sumeruDir, dstDir) {
     //压缩js代码
     var orig_code = buildEntireContent;
     var ast = UglifyJS.parse(orig_code); // parse code and get the initial AST
-    var compressor = UglifyJS.Compressor();
+    var compressor = UglifyJS.Compressor({
+        unused : false,
+        warnings:false
+    });
     ast.figure_out_scope();
     var compressed_ast = ast.transform(compressor);
     compressed_ast.figure_out_scope();
@@ -79,11 +88,21 @@ module.exports = function(sumeruDir, dstDir) {
     compressed_ast.mangle_names(); // get a new AST with mangled names
     var final_code = compressed_ast.print_to_string(); // compressed code here
 
+
+    // var final_code = UglifyJS.minify(orig_code, {
+        // fromString : true
+    // });
+   
+    //clean css
+    var cleanCSS = require('clean-css');
+    var packedCSS = cleanCSS.process(buildCSSEntireContent);
+    
+
     //写入sumeru.js 和 sumeru.css文件
-    fs.writeFileSync(targetCSSFileName, buildCSSEntireContent, 'utf8');
-    fs.writeFileSync(targetJsFileName, final_code, 'utf8');
+    fs.writeFileSync(targetCSSFileName, packedCSS, 'utf8');
+    fs.writeFileSync(targetJsFileName, _debug?buildEntireContent:final_code, 'utf8');
 
   } else{
-    console.log('sumeru dir or sumeru package.js does not exist!');
+    sumeru.log('sumeru dir or sumeru package.js does not exist!');
   }
 }
